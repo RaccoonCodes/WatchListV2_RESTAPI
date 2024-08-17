@@ -1,8 +1,22 @@
 # WatchListV2 API Controller
 The Full Website is still in progress, regardless, here is the API Controller
 
+# WatchListV2 API Controller
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Test Logins](#test-logins)
+3. [Important Note](#important-note)
+4. [Project Structure](#project-structure)
+5. [Key Features](#key-features)
+6. [Configuration](#configuration)
+7. [Separation of Concerns(SoC)](#seperation-of-concerns-soc)
+8. [Code Explanation](#code-explanation)
+9. [Summary](#summary)
+
+
 ## Overview
-This project is developed in .NET 6 that follows CRUD Operations that manages your series and videos that you have personally have seen. There are user and Admin login with Registration included. This API Controller relies on JWT Authentication and distributed SQL server Caching
+This project is developed in .NET 6 that follows CRUD Operations that manages your series and videos that you have personally seen. There are User and Admin login with Registration included. This REST API Controller relies on JWT Authentication and distributed SQL server Caching
 
 I have set up a Swagger endpoint to test API functionality
 
@@ -28,26 +42,27 @@ After a successful login, a JWT token will be returned. Copy this token and use 
 
 ### Important Note
 
-Please change the connection strings to `LocalConnection` instead of `DefaultConnection` in Program.cs file if you wish to use this code locally.
+Please change the connection strings to `LocalConnection` instead of `DefaultConnection` in `Program.cs` file if you wish to use this code locally.
 
 - **Replace:**
   - `opts.ConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");`
   - `opts.UseSqlServer(builder.Configuration["ConnectionStrings:DefaultConnection"]);`
  
 ## Project Structure
-**Attribute**: These files contains helper or extension class to Validation that are used in DTO Folder. They Provide Sort by Order and Sort by entity(ex: id, Genre, Provider) 
+**Attribute**: These files contain helper or extension class to Validation that are used in DTO Folder. They provide Sort by Order and Sort by entity(ex: id, Genre, Provider) 
 
-**Constants**: This is primarily used for Authorization when, registering or signing in users, will apply or check their roles. I used a strongly type approach to avoid human error when applying roles in code.  
+**Constants**:  This is primarily used for authorization during registration or signing in users, and it applies or checks their roles. I used a strongly typed approach to avoid human error when applying roles in the code.
 
 **Controllers**: Each file in the Controllers folder inherits from `ControllerBase`, which provides the minimum functionality needed for controllers that do not handle any view files since they are APIs.
 
-**Data**: In this Folder, it contains a SeedData that will be used when there is no data in the database and needs to populate some data for testing
+**Data**: In this Folder, it contains a SeedData that is used when there is no data in the database and needs to populate some data for testing
 
 **DTO**: The DTO (Data Transfer Object) folder is used for API communication, reducing the amount of data sent by only providing the necessary information for API calls. This folder also includes a file that hosts descriptive links for HATEOAS.
 
-**Extensions**: This Folders contains a class for serializing and deserializing JSON for distributed cache
+**Extensions**: This folders contains a class for serializing and deserializing JSON for distributed cache
 
 **Migrations**: This houses files used for Entity Framework
+
 **Models**: Used for interfaces, implementation, Entity and Identity setup, and Series Model 
 
 ## Key Features
@@ -115,7 +130,7 @@ builder.Services.AddSwaggerGen(opts =>
 ```
 **Swagger Setup**: This configuration enables JWT authentication within Swagger, allowing you to test secure endpoints by providing a token.
 
-### Controllers
+### Controllers Folder
 
 ### AccountController
 The `AccountController` handles authentication and user management functions, including login, registration, and role management. This also pplays a big role in managing security of the application by using JWT tokens.
@@ -176,6 +191,199 @@ uses HATEOAS via RestDTO this provides clients with navigational links in the re
 
 **AdminController**: The adminController only function is retrieving ALL Users. They are able to use SeriesController as well.
 
+### DTO Folder
+
 ### LinkDTO
 
-**Work in progress**
+LinkDTO is a key part of the project as it implements HATEOAS (Hypermedia as the Engine of Application State). 
+
+```csharp
+public class LinkDTO
+{
+    public string Href { get; private set; } // URLs
+    public string Rel { get; private set; } // Relationship
+    public string Type { get; private set; } // Type being sent
+
+    public LinkDTO(string href, string rel, string type)
+    {
+        Href = href;
+        Rel = rel;
+        Type = type;
+    }
+}
+
+```
+This class is immutable which ensure that once the instance is created, it cannot be modified afterward. Since the `sets` are `priavte`, they can only be set via constructor. 
+
+**Href** is a string that will hold URL link that the client can follow. 
+
+**Rel** represents the relationship of the linked resource. This can either be self", "next" and "previous"
+
+**Type** specifies the action that was associated with the link. This can be GET, POST, PUT, or DELETE
+
+This class is used throughout the project. An example of the usage is SeriesController when returning list of series. 
+```csharp
+  public async Task<ActionResult<RestDTO<SeriesModel[]>>> Get([FromQuery] RequestDTO<SeriesDTO> input)
+```
+In this method, The return type will be returning not just status code but also results from the Get method and link Created with RestDTO.
+
+The schema of a requested link and data would be the following
+
+```json
+  "links": [
+    {
+      "href": "string",
+      "rel": "string",
+      "type": "string"
+    }
+  ],
+  "data": [
+    {
+      "seriesID": 0,
+      "userID": "string",
+      "titleWatched": "string",
+      "seasonWatched": "string",
+      "providerWatched": "string",
+      "genre": "string"
+      "rowVersion": "string"
+    }
+  ],
+  "pageIndex": 0,
+  "pageSize": 0,
+  "recordCount": 0
+```
+### RequestDTO
+This class handles incoming API requests. Therefore, it is mostly used in GET operations.
+This supports pagination, sorting, and filtering while validating request before processing them. 
+
+```csharp
+public class RequestDTO<T> : IValidatableObject
+{
+    [DefaultValue(0)]
+    public int PageIndex { get; set; } = 0;
+    
+    [DefaultValue(10)]
+    [Range(1, 100)]
+    public int PageSize { get; set; } = 10;
+    
+    [DefaultValue("TitleWatched")]
+    [SortColumnValidator(typeof(SeriesDTO))]
+    public string? SortColumn { get; set; } = "TitleWatched";
+
+    [DefaultValue("ASC")]
+    [SortOrderValidator]
+    public string? SortOrder { get; set; } = "ASC";
+
+    [DefaultValue(null)]
+    public string? FilterQuery { get; set; } = null;
+
+    [DefaultValue(null)]
+    [Required]
+    public string? UserID { get; set; } = null;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        var validator = new SortColumnValidatorAttribute(typeof(T));
+        var result = validator.GetValidationResult(SortColumn, validationContext);
+        return (result != null) ? new[] { result } : Array.Empty<ValidationResult>();
+    }
+}
+```
+This class also inherits IValidatableObject interface which provides custom validation. The method `Validate` prevents invalid or non-existent columns from being used in sorting operations. This method will either return an array of error messages or an empty array which indicates there was no error.
+
+### RestDTO<T>
+This class is response format for our API. This is used most if not all of the method in each controller. it encapsulate both data and metadata such as pagination and links. 
+
+```csharp
+public class RestDTO<T>
+{
+    public List<LinkDTO> Links { get; set; } = new List<LinkDTO>();
+    public T Data { get; set; } = default!;
+    public int? PageIndex { get; set; }
+    public int? PageSize { get; set; }
+    public int? RecordCount { get; set; }
+}
+```
+
+**Links** contains a list of LinkDTO objects. LinkDTO as been mention and describe above. 
+
+**Data** is a generic type that can allow any class to use. Such as using SeriesDTO objects.
+
+**PageIndex** is an optional property indicates the current page index of the data being returned. This is for paginated responses, allowing clients to understand which portion of the dataset they are currently viewing.
+
+**PageSize** is similar to PageIndex, this optional property specifies the number of records per page. It helps the client understand how much data is being returned in each paginated response.
+
+**RecordCount** is an optional property that provides the total number of records available in the dataset. It’s useful for clients to understand the overall size of the dataset and to implement pagination or lazy loading effectively.
+
+This serves, again, as a response from the API so most, if not, all method will have this in their return type.
+
+### ApplicationDbContext class
+
+This class is the main point for managing database access in the application. It inherits `IdentityDbContext<ApiUsers>`, providing full integration with ASP.NET Core Identity for user authentication and authorization, while also managing the entities such as `SeriesModel`.
+
+Within OnModelCreating Method
+
+```csharp
+ protected override void OnModelCreating(ModelBuilder modelBuilder)
+ {
+     base.OnModelCreating(modelBuilder);
+
+     //For ApiUsers
+     modelBuilder.Entity<ApiUsers>(entity =>
+     {
+         entity.HasKey(k => k.Id);
+         entity.Property(p => p.Id).HasColumnName("UserID");
+     });
+
+     //For SeriesModel
+     modelBuilder.Entity<SeriesModel>(entity =>
+     {
+         entity.HasKey(k => k.SeriesID); //Primary Key
+         entity.Property(p => p.SeriesID).ValueGeneratedOnAdd();//Auto Generate ID
+         entity.HasOne(h => h.ApiUsers)
+         .WithMany(u => u.Series) //Each User can have multiple series
+         .HasForeignKey(f => f.UserID) //Defines UserID as foreign Key
+         .OnDelete(DeleteBehavior.Cascade);
+         
+     });
+     //creating RowVersioning for concurrency
+     modelBuilder.Entity<SeriesModel>()
+         .Property(p => p.RowVersion)
+         .IsRowVersion();
+
+ }
+```
+
+This method ovverides its configuration to map entities and relationships for the database.
+
+**ApiUsers Configuration:**
+
+The `ApiUsers` entity is configured to use `Id` as the primary key, which is renamed to `UserID` in the database schema. This makes it clear that the UserID is the unique identifier for users in your application.
+
+**SeriesModel Configuration:**
+
+The `SeriesModel` entity is configured to use `SeriesID` as the primary key, with the ID being auto-generated when a series is created.
+
+A one-to-many relationship is established between `ApiUsers` and `SeriesModel`, where each user can have multiple series associated with their account. The UserID in SeriesModel serves as a foreign key linking to the ApiUsers entity.
+
+The `OnDelete(DeleteBehavior.Cascade)` configuration ensures that when a user is deleted, all related series entries are also deleted, maintaining integrity.
+
+**Row Versioning:**
+
+The `RowVersion` property in `SeriesModel` is configured for concurrency control. Entity Framework will automatically use this versioning to detect conflicting updates for data integrity in concurrent environments.
+
+### Summary
+This project is focuses mainly on Back-End work for REST API. It also features 
+- JWT authentication
+- Authorization, Roles, and claims
+- Distributed SQL Server Caching
+- Swagger testing
+- Identity Integration
+- Concurrency Checks
+- HATEOAS
+- filters, sorting, and paginations
+- Decoupling by Seperation of Concern
+
+**Future Implementation**
+
+A working website where it uses this API and usage of CSS, SASS, and Bootstrap for front-end work
